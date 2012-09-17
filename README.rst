@@ -127,6 +127,7 @@ Emitting events when users make requests
 Add a new file, ``tutorial/events.py`` with the following content:
 
 .. code-block:: python
+
    from pyramid.events import NewRequest
    from pyramid.events import subscriber
 
@@ -155,6 +156,7 @@ Combining components to make a live widget
 Add a new file ``tutorial/widgets.py`` with the following content:
 
 .. code-block:: python
+
     from tw2.d3 import TimeSeriesChart
     from moksha.wsgi.widgets.api.live import LiveWidget
 
@@ -186,6 +188,7 @@ Rendering Moksha Frontend Components
 Go back to ``tutorial/events.py`` and add the following new handler:
 
 .. code-block:: python
+
     from pyramid.events import BeforeRender
     from pyramid.threadlocal import get_current_request
 
