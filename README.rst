@@ -65,7 +65,7 @@ Moksha is framework-agnostic, meaning that you can use it with `TurboGears2
 `Flask <http://moksha.readthedocs.org/en/latest/main/tutorials/Flask>`_.  It
 integrates with apps written against those frameworks by way of a layer of WSGI
 middleware you need to install.  Moksha is pretty highly-dependent on
-`ToscaWidgets2 <http://toscawidgets.org>_` which has its own middleware layer.
+`ToscaWidgets2 <http://toscawidgets.org>`_ which has its own middleware layer.
 You'll need to enable both, and in a particular order!
 
 Go and edit ``development.ini``.  There should be a section at the top named
