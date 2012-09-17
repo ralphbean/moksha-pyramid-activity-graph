@@ -7,7 +7,8 @@ Moksha Tutorial:  Live Graph of User Activity
 
 Today I'll be showing you how to add a websocket-powered
 `d3 <http://d3js.org/>`_ graph of user activity to a
-`pyramid <http://www.pylonsproject.org/>`_ app.
+`pyramid <http://www.pylonsproject.org/>`_ app using `moksha
+<http://mokshaproject.net>`_.
 
 Bootstrapping
 -------------
@@ -28,14 +29,17 @@ Set up a virtualenv and install Moksha and Pyramid (install
     $ mkvirtualenv tutorial
     $ pip install pyramid
     $ pip install moksha.wsgi moksha.hub
+
     $ # tw2.d3 for our frontend component.
     $ pip install tw2.d3
+
     $ # Also, install weberror for kicks.
     $ pip install weberror
 
 Use ``pcreate`` to setup a Pyramid scaffold, install dependencies,
 and verify that its working.  I like the ``alchemy`` scaffold, so we'll use that
-one.
+one.  Its kind of silly, though:  we won't be using a database or sqlalchemy at
+all for this tutorial.
 
 .. code-block:: bash
 
@@ -54,6 +58,15 @@ Enable ToscaWidgets2 and Moksha Middlewares
 .. note:: Enabling the middleware here is also identical to the `Hello World
    <http://moksha.readthedocs.org/en/latest/main/tutorials/Pyramid/>`_
    tutorial.
+
+Moksha is framework-agnostic, meaning that you can use it with `TurboGears2
+<http://moksha.readthedocs.org/en/latest/main/tutorials/TurboGears2/>`_,
+`Pyramid <http://moksha.readthedocs.org/en/latest/main/tutorials/Pyramid>`_, or
+`Flask <http://moksha.readthedocs.org/en/latest/main/tutorials/Flask>`_.  It
+integrates with apps written against those frameworks by way of a layer of WSGI
+middleware you need to install.  Moksha is pretty highly-dependent on
+`ToscaWidgets2 <http://toscawidgets.org>_` which has its own middleware layer.
+You'll need to enable both, and in a particular order!
 
 Go and edit ``development.ini``.  There should be a section at the top named
 ``[app:main]``.  Change that to ``[app:tutorial]``.  Then, just above the
@@ -83,6 +96,18 @@ Provide some configuration for Moksha
    <http://moksha.readthedocs.org/en/latest/main/tutorials/Pyramid/>`_
    tutorial.
 
+We're going to configure moksha to communicate with `zeromq
+<http://www.zeromq.org>`_ and `WebSocket <http://websocket.org>`_.  As an aside,
+one of Moksha's goals is to provide an abstraction over different messaging
+transports.  It can speak zeromq, AMQP, and STOMP on the backend, and WebSocket
+or COMET emulated-AMQP and/or STOMP on the frontend.
+
+We need to configure a number of things:
+
+ - Your app needs to know how to talk to the ``moksha-hub`` with zeromq.
+ - Your clients need to know where to find their websocket server (its housed
+   inside the ``moksha-hub``).
+
 Edit ``development.ini`` and add the following lines in the ``[app:tutorial]``
 section.  Do it just under the ``sqlalchemy.url`` line::
 
@@ -102,18 +127,15 @@ section.  Do it just under the ``sqlalchemy.url`` line::
     zmq_publish_endpoints = tcp://*:3001
     zmq_subscribe_endpoints = tcp://127.0.0.1:3000,tcp://127.0.0.1:3001
 
-Also, add a new ``hub-config.ini`` file with the following (nearly identical) content.  Notice that the only real different is the value of ``zmq_publish_endpoints``::
+Also, add a new ``hub-config.ini`` file with the following (nearly identical) content.
+Notice that the only real different is the value of ``zmq_publish_endpoints``::
 
     [app:tutorial]
     ##moksha.domain = live.example.com
     moksha.domain = localhost
 
-    moksha.notifications = True
-    moksha.socket.notify = True
-
     moksha.livesocket = True
     moksha.livesocket.backend = websocket
-    #moksha.livesocket.reconnect_interval = 5000
     moksha.livesocket.websocket.port = 9998
 
     zmq_enabled = True
@@ -123,6 +145,11 @@ Also, add a new ``hub-config.ini`` file with the following (nearly identical) co
 
 Emitting events when users make requests
 ----------------------------------------
+
+This is the one tiny little nugget of "business logic" we're going to add.  When
+a user anywhere makes a `Request` on our app, we want to emit a message that can
+then be viewed in graphs by other users.  Pretty simple: we'll just emit a
+message on a topic we hardcode that has an empty ``dict`` for its body.
 
 Add a new file, ``tutorial/events.py`` with the following content:
 
@@ -148,10 +175,17 @@ Add a new file, ``tutorial/events.py`` with the following content:
        """
 
        hub = hub_factory(event.request.registry.settings)
-       hub.send_message("tutorial.newrequest", message={})
+       hub.send_message(topic="tutorial.newrequest", message={})
 
 Combining components to make a live widget
 ------------------------------------------
+
+With those messages now being emitted to the ``"tutorial.newrequest"`` topic, we
+can construct a frontend widget with ToscaWidgets2 that listens to that topic
+(using a Moksha LiveWidget mixin).  When a message is received on the client the
+javascript contained in ``onmessage`` will be executed (and passed a json object
+of the message body).  We'll ignore that since its empty, and just increment a
+counter provided by ``tw2.d3``.
 
 Add a new file ``tutorial/widgets.py`` with the following content:
 
@@ -185,6 +219,11 @@ Add a new file ``tutorial/widgets.py`` with the following content:
 Rendering Moksha Frontend Components
 ------------------------------------
 
+With our widget defined, we'll need to expose it to our chameleon template and
+render it.  Instead of doing this per-view like you might normally, we're going
+to flex Pyramid's events system some more and inject it (and the requisite
+``moksha_socket`` widget) on every page.
+
 Go back to ``tutorial/events.py`` and add the following new handler:
 
 .. code-block:: python
@@ -208,7 +247,7 @@ Go back to ``tutorial/events.py`` and add the following new handler:
         event['users_widget'] = get_time_series_widget(request.registry.settings)
         event['moksha_socket'] = get_moksha_socket(request.registry.settings)
 
-And lastly, go edit ``tutorial/templates/mytemplate.pt`` to display
+And lastly, go edit ``tutorial/templates/mytemplate.pt`` so that it displays
 ``users_widget`` and ``moksha_socket`` on the page::
 
     <div id="bottom">
@@ -221,11 +260,11 @@ And lastly, go edit ``tutorial/templates/mytemplate.pt`` to display
 Running the Hub alongside pserve
 --------------------------------
 
-The ``moksha-hub`` command will start up and begin handling your zeromq
+When the ``moksha-hub`` process starts up, it will begin handling your
 messages.  It also houses a small websocket server that the ``moksha_socket``
-will try to connect to.
+will try to connect back to.
 
-Open up *two* terminals, activate your virtualenv in both with ``workon
+Open up *two* terminals and activate your virtualenv in both with ``workon
 tutorial``.  In one of them, run::
 
     $ moksha-hub -v hub-config.ini
