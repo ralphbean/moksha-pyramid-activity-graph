@@ -8,3 +8,4 @@ README.pdf
 *.db*
 data
 ez_setup
+*.sqlite*
